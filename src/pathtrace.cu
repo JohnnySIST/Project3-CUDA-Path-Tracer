@@ -25,6 +25,9 @@
 #define USE_SORT_MATERIAL 1
 #define USE_RANDOM_SAMPLE 1
 
+#define USE_RUSSIAN_ROULETTE 1
+#define P_RR 0.9f // Russian Roulette probability
+
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
 void checkCUDAErrorFn(const char* msg, const char* file, int line)
@@ -347,6 +350,15 @@ __global__ void shadeBSDFMaterial(
             // like what you would expect from shading in a rasterizer like OpenGL.
             // TODO: replace this! you should be able to start with basically a one-liner
             else {
+                if (USE_RUSSIAN_ROULETTE) {
+                    thrust::uniform_real_distribution<float> u01(0, 1);
+                    if (u01(rng) > P_RR) {
+                        segment.remainingBounces = -1; // terminate the path
+                        return;
+                    } else {
+                        segment.color /= P_RR; // account for the probability of survival
+                    }
+                }
                 glm::vec3 intersectPoint = getPointOnRay(segment.ray, intersection.t);
                 scatterRay(segment, intersectPoint, intersection.surfaceNormal, material, rng);
             }

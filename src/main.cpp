@@ -350,6 +350,13 @@ int main(int argc, char** argv)
 
     const char* sceneFile = argv[1];
 
+    // check whether sceneFile exists
+    std::ifstream infile(sceneFile);
+    if (!infile) {
+        std::cerr << "Error: file " << sceneFile << " not found." << std::endl;
+        return 1;
+    }
+
     // Load scene file
     scene = new Scene(sceneFile);
 
