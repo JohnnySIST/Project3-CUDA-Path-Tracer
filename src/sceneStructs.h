@@ -12,7 +12,8 @@
 enum GeomType
 {
     SPHERE,
-    CUBE
+    CUBE,
+    MODEL
 };
 
 struct Ray
@@ -25,6 +26,7 @@ struct Geom
 {
     enum GeomType type;
     int materialid;
+    int modelid;
     glm::vec3 translation;
     glm::vec3 rotation;
     glm::vec3 scale;
@@ -84,4 +86,5 @@ struct ShadeableIntersection
   float t;
   glm::vec3 surfaceNormal;
   int materialId;
+  bool outside;
 };

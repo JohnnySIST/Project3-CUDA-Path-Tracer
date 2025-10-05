@@ -75,18 +75,31 @@ void Scene::loadFromJSON(const std::string& jsonName)
         MatNameToID[name] = materials.size();
         materials.emplace_back(newMaterial);
     }
+
+    std::unordered_map<std::string, uint32_t> ModelNameToID;
+    const auto& modelData = data["Models"];
+    for (const auto& item : modelData.items())
+    {
+        const auto& name = item.key();
+        const auto& path = item.value();
+        Mesh newMesh(path);
+        ModelNameToID[name] = meshes.size();
+        meshes.emplace_back(newMesh);
+    }
+
     const auto& objectsData = data["Objects"];
     for (const auto& p : objectsData)
     {
         const auto& type = p["TYPE"];
         Geom newGeom;
-        if (type == "cube")
-        {
+        if (type == "cube") {
             newGeom.type = CUBE;
         }
-        else
-        {
+        else if (type == "sphere") {
             newGeom.type = SPHERE;
+        } else if (type == "model") {
+            newGeom.type = MODEL;
+            newGeom.modelid = ModelNameToID[p["MODEL"]];
         }
         newGeom.materialid = MatNameToID[p["MATERIAL"]];
         const auto& trans = p["TRANS"];

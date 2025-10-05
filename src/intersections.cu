@@ -111,3 +111,50 @@ __host__ __device__ float sphereIntersectionTest(
 
     return glm::length(r.origin - intersectionPoint);
 }
+
+__host__ __device__ float meshIntersectionTest(
+    MeshGPU mesh,
+    Geom model,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside)
+{
+    float t = -1;
+    for (int i = 0; i < mesh.numTriangles; ++i) {
+        glm::vec3 v0 = mesh.positions[i * 3 + 0];
+        glm::vec3 v1 = mesh.positions[i * 3 + 1];
+        glm::vec3 v2 = mesh.positions[i * 3 + 2];
+        
+        Ray q;
+        q.origin = multiplyMV(model.inverseTransform, glm::vec4(r.origin, 1.0f));
+        q.direction = glm::normalize(multiplyMV(model.inverseTransform, glm::vec4(r.direction, 0.0f)));
+        
+        glm::vec3 bary;
+        bool hit = glm::intersectRayTriangle(q.origin, q.direction, v0, v1, v2, bary);
+        if (hit && bary.z > 0.01f) {
+            t = bary.z;
+            glm::vec3 objspaceIntersection = getPointOnRay(q, t);
+            intersectionPoint = multiplyMV(model.transform, glm::vec4(objspaceIntersection, 1.0f));
+
+            if (true || mesh.normals == nullptr) {
+                glm::vec3 e0 = v1 - v0;
+                glm::vec3 e1 = v2 - v0;
+                normal = glm::normalize(multiplyMV(model.invTranspose, glm::vec4(glm::cross(e0, e1), 0.f)));
+                outside = glm::dot(normal, r.direction) < 0;
+                if (!outside) {
+                    normal = -normal;
+                }
+            } else {
+                float w = 1.0f - bary.x - bary.y;
+                glm::vec3 n0 = mesh.normals[i * 3 + 0];
+                glm::vec3 n1 = mesh.normals[i * 3 + 1];
+                glm::vec3 n2 = mesh.normals[i * 3 + 2];
+                glm::vec3 n = w * n0 + bary.x * n1 + bary.y * n2;
+                normal = glm::normalize(multiplyMV(model.invTranspose, glm::vec4(n, 0.f)));
+                outside = glm::dot(normal, r.direction) < 0;
+            }
+        }
+    }
+    return t;
+}

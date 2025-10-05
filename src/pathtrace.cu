@@ -96,6 +96,8 @@ static ShadeableIntersection* dev_intersections = NULL;
 // static int* dev_indices = NULL;
 // static PathSegment* dev_paths_tmp = NULL;
 // static ShadeableIntersection* dev_intersections_tmp = NULL;
+// Meshes
+static MeshGPU* dev_meshes = NULL;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
@@ -129,6 +131,31 @@ void pathtraceInit(Scene* scene)
     // cudaMalloc(&dev_paths_tmp, pixelcount * sizeof(PathSegment));
     // cudaMalloc(&dev_intersections_tmp, pixelcount * sizeof(ShadeableIntersection));
 
+    cudaMalloc(&dev_meshes, scene->meshes.size() * sizeof(Mesh));
+    for (int i = 0; i < scene->meshes.size(); i++) {
+        Mesh& mesh = scene->meshes[i];
+
+        glm::vec3* dev_positions;
+        glm::vec3* dev_normals;
+
+        bool has_normal = mesh.positions.size() == mesh.normals.size();
+
+        cudaMalloc(&dev_positions, mesh.positions.size() * sizeof(glm::vec3));
+        cudaMemcpy(dev_positions, mesh.positions.data(), mesh.positions.size() * sizeof(glm::vec3), cudaMemcpyHostToDevice);
+
+        if (has_normal) {
+            cudaMalloc(&dev_normals, mesh.normals.size() * sizeof(glm::vec3));
+            cudaMemcpy(dev_normals, mesh.normals.data(), mesh.normals.size() * sizeof(glm::vec3), cudaMemcpyHostToDevice);
+        }
+
+        MeshGPU meshGPU;
+        meshGPU.positions = dev_positions;
+        meshGPU.normals = has_normal ? dev_normals : nullptr;
+        meshGPU.numTriangles = mesh.positions.size() / 3;
+
+        cudaMemcpy(&dev_meshes[i], &meshGPU, sizeof(MeshGPU), cudaMemcpyHostToDevice);
+    }
+
     checkCUDAError("pathtraceInit");
 }
 
@@ -144,6 +171,18 @@ void pathtraceFree()
     // cudaFree(dev_indices);
     // cudaFree(dev_paths_tmp);
     // cudaFree(dev_intersections_tmp);
+
+    if (dev_meshes != NULL) {
+        for (int i = 0; i < hst_scene->meshes.size(); i++) {
+            MeshGPU meshGPU;
+            cudaMemcpy(&meshGPU, &dev_meshes[i], sizeof(MeshGPU), cudaMemcpyDeviceToHost);
+
+            cudaFree(meshGPU.positions);
+            cudaFree(meshGPU.normals);
+        }
+    }
+    
+    cudaFree(dev_meshes);
 
     checkCUDAError("pathtraceFree");
 }
@@ -200,7 +239,8 @@ __global__ void computeIntersections(
     PathSegment* pathSegments,
     Geom* geoms,
     int geoms_size,
-    ShadeableIntersection* intersections)
+    ShadeableIntersection* intersections,
+    MeshGPU* meshes)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -224,13 +264,13 @@ __global__ void computeIntersections(
         {
             Geom& geom = geoms[i];
 
-            if (geom.type == CUBE)
-            {
+            if (geom.type == CUBE) {
                 t = boxIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
             }
-            else if (geom.type == SPHERE)
-            {
+            else if (geom.type == SPHERE) {
                 t = sphereIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+            } else if (geom.type == MODEL) {
+                t = meshIntersectionTest(meshes[geom.modelid], geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
             }
             // TODO: add more intersection tests here... triangle? metaball? CSG?
 
@@ -255,6 +295,7 @@ __global__ void computeIntersections(
             intersections[path_index].t = t_min;
             intersections[path_index].materialId = geoms[hit_geom_index].materialid;
             intersections[path_index].surfaceNormal = normal;
+            intersections[path_index].outside = outside;
         }
     }
 }
@@ -360,7 +401,7 @@ __global__ void shadeBSDFMaterial(
                     }
                 }
                 glm::vec3 intersectPoint = getPointOnRay(segment.ray, intersection.t);
-                scatterRay(segment, intersectPoint, intersection.surfaceNormal, material, rng);
+                scatterRay(segment, intersectPoint, intersection.surfaceNormal, material, rng, intersection.outside);
             }
             // If there was no intersection, color the ray black.
             // Lots of renderers use 4 channel color, RGBA, where A = alpha, often
@@ -490,7 +531,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_paths,
             dev_geoms,
             hst_scene->geoms.size(),
-            dev_intersections
+            dev_intersections,
+            dev_meshes
         );
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();
