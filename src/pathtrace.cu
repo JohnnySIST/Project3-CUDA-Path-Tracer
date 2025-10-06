@@ -24,6 +24,7 @@
 #define USE_COMPACTION 1
 #define USE_SORT_MATERIAL 1
 #define USE_RANDOM_SAMPLE 1
+#define USE_BVH 1
 
 #define USE_RUSSIAN_ROULETTE 1
 #define P_RR 0.9f // Russian Roulette probability
@@ -134,6 +135,7 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_meshes, scene->meshes.size() * sizeof(Mesh));
     for (int i = 0; i < scene->meshes.size(); i++) {
         Mesh& mesh = scene->meshes[i];
+        MeshGPU meshGPU;
 
         glm::vec3* dev_positions;
         glm::vec3* dev_normals;
@@ -148,10 +150,26 @@ void pathtraceInit(Scene* scene)
             cudaMemcpy(dev_normals, mesh.normals.data(), mesh.normals.size() * sizeof(glm::vec3), cudaMemcpyHostToDevice);
         }
 
-        MeshGPU meshGPU;
         meshGPU.positions = dev_positions;
         meshGPU.normals = has_normal ? dev_normals : nullptr;
         meshGPU.numTriangles = mesh.positions.size() / 3;
+
+        if (mesh.bvh != nullptr && USE_BVH) {
+            BVHNodeGPU* dev_bvh_nodes;
+            int* dev_bvh_indices;
+
+            std::vector<BVHNodeGPU> bvh_nodes;
+            std::vector<int> bvh_indices;
+            mesh.flattenNodes(bvh_nodes, bvh_indices, mesh.bvh);
+
+            cudaMalloc(&dev_bvh_nodes, bvh_nodes.size() * sizeof(BVHNodeGPU));
+            cudaMemcpy(dev_bvh_nodes, bvh_nodes.data(), bvh_nodes.size() * sizeof(BVHNodeGPU), cudaMemcpyHostToDevice);
+            cudaMalloc(&dev_bvh_indices, bvh_indices.size() * sizeof(int));
+            cudaMemcpy(dev_bvh_indices, bvh_indices.data(), bvh_indices.size() * sizeof(int), cudaMemcpyHostToDevice);
+
+            meshGPU.bvh_nodes = dev_bvh_nodes;
+            meshGPU.bvh_indices = dev_bvh_indices;
+        }
 
         cudaMemcpy(&dev_meshes[i], &meshGPU, sizeof(MeshGPU), cudaMemcpyHostToDevice);
     }
@@ -179,6 +197,8 @@ void pathtraceFree()
 
             cudaFree(meshGPU.positions);
             cudaFree(meshGPU.normals);
+            cudaFree(meshGPU.bvh_nodes);
+            cudaFree(meshGPU.bvh_indices);
         }
     }
     
@@ -270,7 +290,11 @@ __global__ void computeIntersections(
             else if (geom.type == SPHERE) {
                 t = sphereIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
             } else if (geom.type == MODEL) {
+#if USE_BVH
+                t = meshIntersectionTestBVH(meshes[geom.modelid], geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+#else
                 t = meshIntersectionTest(meshes[geom.modelid], geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+#endif
             }
             // TODO: add more intersection tests here... triangle? metaball? CSG?
 

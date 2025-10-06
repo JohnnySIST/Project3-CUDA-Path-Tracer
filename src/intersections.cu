@@ -132,7 +132,7 @@ __host__ __device__ float meshIntersectionTest(
         
         glm::vec3 bary;
         bool hit = glm::intersectRayTriangle(q.origin, q.direction, v0, v1, v2, bary);
-        if (hit && bary.z > 0.01f) {
+        if (hit && bary.z > 0.01f && (t < 0 || bary.z < t)) {
             t = bary.z;
             glm::vec3 objspaceIntersection = getPointOnRay(q, t);
             intersectionPoint = multiplyMV(model.transform, glm::vec4(objspaceIntersection, 1.0f));
@@ -153,6 +153,72 @@ __host__ __device__ float meshIntersectionTest(
                 glm::vec3 n = w * n0 + bary.x * n1 + bary.y * n2;
                 normal = glm::normalize(multiplyMV(model.invTranspose, glm::vec4(n, 0.f)));
                 outside = glm::dot(normal, r.direction) < 0;
+            }
+        }
+    }
+    return t;
+}
+
+__host__ __device__ float meshIntersectionTestBVH(
+    MeshGPU mesh,
+    Geom model,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside)
+{
+    int bvhIndex = 0;
+    while (true) {
+        BVHNodeGPU node = mesh.bvh_nodes[bvhIndex];
+        float t_in, t_out;
+        if (!node.aabb.intersect(r.origin, r.direction, &t_in, &t_out)) {
+            return -1;
+        }
+        bool intersectLeft = false, intersectRight = false;
+        if (node.leftIndex != -1) {
+            BVHNodeGPU leftNode = mesh.bvh_nodes[node.leftIndex];
+            intersectLeft = leftNode.aabb.intersect(r.origin, r.direction, &t_in, &t_out);
+        }
+        if (node.rightIndex != -1) {
+            BVHNodeGPU rightNode = mesh.bvh_nodes[node.rightIndex];
+            intersectRight = rightNode.aabb.intersect(r.origin, r.direction, &t_in, &t_out);
+        }
+        if (intersectLeft && intersectRight) {
+            break;
+        } else if (intersectLeft) {
+            bvhIndex = node.leftIndex;
+        } else if (intersectRight) {
+            bvhIndex = node.rightIndex;
+        } else {
+            return -1;
+        }
+    }
+
+    float t = -1;
+    BVHNodeGPU node = mesh.bvh_nodes[bvhIndex];
+    for (int i = node.start; i < node.end; ++i) {
+        int index = mesh.bvh_indices[i];
+        glm::vec3 v0 = mesh.positions[index * 3 + 0];
+        glm::vec3 v1 = mesh.positions[index * 3 + 1];
+        glm::vec3 v2 = mesh.positions[index * 3 + 2];
+
+        Ray q;
+        q.origin = multiplyMV(model.inverseTransform, glm::vec4(r.origin, 1.0f));
+        q.direction = glm::normalize(multiplyMV(model.inverseTransform, glm::vec4(r.direction, 0.0f)));
+        
+        glm::vec3 bary;
+        bool hit = glm::intersectRayTriangle(q.origin, q.direction, v0, v1, v2, bary);
+        if (hit && bary.z > 0.01f && (t < 0 || bary.z < t)) {
+            t = bary.z;
+            glm::vec3 objspaceIntersection = getPointOnRay(q, t);
+            intersectionPoint = multiplyMV(model.transform, glm::vec4(objspaceIntersection, 1.0f));
+
+            glm::vec3 e0 = v1 - v0;
+            glm::vec3 e1 = v2 - v0;
+            normal = glm::normalize(multiplyMV(model.invTranspose, glm::vec4(glm::cross(e0, e1), 0.f)));
+            outside = glm::dot(normal, r.direction) < 0;
+            if (!outside) {
+                normal = -normal;
             }
         }
     }

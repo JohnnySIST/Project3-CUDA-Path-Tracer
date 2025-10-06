@@ -80,3 +80,11 @@ __host__ __device__ float meshIntersectionTest(
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
     bool& outside);
+
+__host__ __device__ float meshIntersectionTestBVH(
+    MeshGPU mesh,
+    Geom model,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside);

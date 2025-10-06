@@ -84,6 +84,8 @@ void Scene::loadFromJSON(const std::string& jsonName)
         const auto& path = item.value();
         Mesh newMesh(path);
         ModelNameToID[name] = meshes.size();
+        newMesh.buildBVH();
+        // newMesh.printBVH(newMesh.bvh);
         meshes.emplace_back(newMesh);
     }
 
