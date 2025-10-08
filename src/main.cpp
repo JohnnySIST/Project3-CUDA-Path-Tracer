@@ -446,6 +446,13 @@ void runCuda()
         cameraPosition += cam.lookAt;
         cam.position = cameraPosition;
         camchanged = false;
+
+        // printf("Camera changed: pos(%.2f, %.2f, %.2f) view(%.2f, %.2f, %.2f) up(%.2f, %.2f, %.2f) right(%.2f, %.2f, %.2f) lookAt(%.2f, %.2f, %.2f)\n",
+        //     cam.position.x, cam.position.y, cam.position.z,
+        //     cam.view.x, cam.view.y, cam.view.z,
+        //     cam.up.x, cam.up.y, cam.up.z,
+        //     cam.right.x, cam.right.y, cam.right.z,
+        //     cam.lookAt.x, cam.lookAt.y, cam.lookAt.z);
     }
 
     // Map OpenGL buffer object for writing from CUDA on a single GPU

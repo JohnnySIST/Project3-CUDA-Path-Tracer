@@ -131,51 +131,30 @@ AABB::AABB(const AABB &a, const AABB &b) {
   upper = glm::max(a.upper, b.upper);
 }
 
-bool AABB::intersect(glm::vec3 origin, glm::vec3 direction, float *t_in, float *t_out) {
-    float dir_frac_x = (direction[0] == 0.0) ? 1.0e32 : 1.0 / direction[0];
-    float dir_frac_y = (direction[1] == 0.0) ? 1.0e32 : 1.0 / direction[1];
-    float dir_frac_z = (direction[2] == 0.0) ? 1.0e32 : 1.0 / direction[2];
-
-    float tx1 = (low[0] - origin[0]) * dir_frac_x;
-    float tx2 = (upper[0] - origin[0]) * dir_frac_x;
-    float ty1 = (low[1] - origin[1]) * dir_frac_y;
-    float ty2 = (upper[1] - origin[1]) * dir_frac_y;
-    float tz1 = (low[2] - origin[2]) * dir_frac_z;
-    float tz2 = (upper[2] - origin[2]) * dir_frac_z;
-
-    *t_in = std::max(std::max(std::min(tx1, tx2), std::min(ty1, ty2)), std::min(tz1, tz2));
-    *t_out = std::min(std::min(std::max(tx1, tx2), std::max(ty1, ty2)), std::max(tz1, tz2));
-
-    if (*t_out < 0) return false;
-
-    return *t_out >= *t_in;
-}
-
 int Mesh::flattenNodes(std::vector<BVHNodeGPU>& nodes, std::vector<int>& indices, BVHNode* node) {
     if (node == nullptr) return -1;
     int nodeIndex = nodes.size();
     nodes.emplace_back();
-    BVHNodeGPU& nodeGPU = nodes.back();
-    nodeGPU.aabb = node->aabb;
+    nodes[nodeIndex].leftIndex = -1;
+    nodes[nodeIndex].rightIndex = -1;
+    nodes[nodeIndex].aabb = node->aabb;
     if (node->left != nullptr) {
-        nodeGPU.leftIndex = flattenNodes(nodes, indices, node->left);
-    } else {
-        nodeGPU.leftIndex = -1;
+        nodes[nodeIndex].leftIndex = flattenNodes(nodes, indices, node->left);
     }
     if (node->right != nullptr) {
-        nodeGPU.rightIndex = flattenNodes(nodes, indices, node->right);
-    } else {
-        nodeGPU.rightIndex = -1;
+        nodes[nodeIndex].rightIndex = flattenNodes(nodes, indices, node->right);
     }
+
+    //printf("internal node %d: left %d, right %d, size %d\n", nodeIndex, nodes[nodeIndex].leftIndex, nodes[nodeIndex].rightIndex, nodes.size());
     if (node->left == nullptr || node->right == nullptr) {
-        nodeGPU.start = indices.size();
-        nodeGPU.end = indices.size() + node->triangles.size();
+        nodes[nodeIndex].start = indices.size();
+        nodes[nodeIndex].end = indices.size() + node->triangles.size();
         for (int tri : node->triangles) {
             indices.push_back(tri);
         }
     } else {
-        nodeGPU.start = nodes[nodeGPU.leftIndex].start;
-        nodeGPU.end = nodes[nodeGPU.rightIndex].end;
+        nodes[nodeIndex].start = nodes[nodes[nodeIndex].leftIndex].start;
+        nodes[nodeIndex].end = nodes[nodes[nodeIndex].rightIndex].end;
     }
     return nodeIndex;
 }

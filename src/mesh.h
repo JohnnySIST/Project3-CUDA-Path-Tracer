@@ -12,7 +12,6 @@ struct AABB {
   AABB(glm::vec3 low, glm::vec3 upper) : low(low), upper(upper) {}
   AABB(const glm::vec3 &v1, const glm::vec3 &v2, const glm::vec3 &v3);
   AABB(const AABB &a, const AABB &b);
-  bool intersect(glm::vec3 origin, glm::vec3 direction, float *t_in, float *t_out);
 };
 
 struct BVHNode {
@@ -42,7 +41,7 @@ class Mesh {
 public:
     Mesh() : materialid(-1), bvh(nullptr) {}
     Mesh(const std::string& filename) { loadFromGLTF(filename); }
-    ~Mesh() { freeBVH(bvh); }
+    // ~Mesh() { freeBVH(bvh); }
     void loadFromGLTF(const std::string& filename);
     void buildBVH();
     void freeBVH(BVHNode* node);

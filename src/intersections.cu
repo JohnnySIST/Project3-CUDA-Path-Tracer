@@ -170,18 +170,17 @@ __host__ __device__ float meshIntersectionTestBVH(
     int bvhIndex = 0;
     while (true) {
         BVHNodeGPU node = mesh.bvh_nodes[bvhIndex];
-        float t_in, t_out;
-        if (!node.aabb.intersect(r.origin, r.direction, &t_in, &t_out)) {
+        if (!AABBintersectTest(node.aabb, r.origin, r.direction)) {
             return -1;
         }
         bool intersectLeft = false, intersectRight = false;
         if (node.leftIndex != -1) {
             BVHNodeGPU leftNode = mesh.bvh_nodes[node.leftIndex];
-            intersectLeft = leftNode.aabb.intersect(r.origin, r.direction, &t_in, &t_out);
+            intersectLeft = AABBintersectTest(leftNode.aabb, r.origin, r.direction);
         }
         if (node.rightIndex != -1) {
             BVHNodeGPU rightNode = mesh.bvh_nodes[node.rightIndex];
-            intersectRight = rightNode.aabb.intersect(r.origin, r.direction, &t_in, &t_out);
+            intersectRight = AABBintersectTest(rightNode.aabb, r.origin, r.direction);
         }
         if (intersectLeft && intersectRight) {
             break;
@@ -190,7 +189,8 @@ __host__ __device__ float meshIntersectionTestBVH(
         } else if (intersectRight) {
             bvhIndex = node.rightIndex;
         } else {
-            return -1;
+            // leaf node
+            break;
         }
     }
 
@@ -223,4 +223,25 @@ __host__ __device__ float meshIntersectionTestBVH(
         }
     }
     return t;
+}
+
+__host__ __device__ bool AABBintersectTest(AABB aabb, glm::vec3 origin, glm::vec3 direction) {
+    float dir_frac_x = (direction[0] == 0.0) ? 1.0e32 : 1.0 / direction[0];
+    float dir_frac_y = (direction[1] == 0.0) ? 1.0e32 : 1.0 / direction[1];
+    float dir_frac_z = (direction[2] == 0.0) ? 1.0e32 : 1.0 / direction[2];
+
+    float tx1 = (aabb.low[0] - origin[0]) * dir_frac_x;
+    float tx2 = (aabb.upper[0] - origin[0]) * dir_frac_x;
+    float ty1 = (aabb.low[1] - origin[1]) * dir_frac_y;
+    float ty2 = (aabb.upper[1] - origin[1]) * dir_frac_y;
+    float tz1 = (aabb.low[2] - origin[2]) * dir_frac_z;
+    float tz2 = (aabb.upper[2] - origin[2]) * dir_frac_z;
+
+    float t_in, t_out;
+    t_in = fmaxf(fmaxf(fminf(tx1, tx2), fminf(ty1, ty2)), fminf(tz1, tz2));
+    t_out = fminf(fminf(fmaxf(tx1, tx2), fmaxf(ty1, ty2)), fmaxf(tz1, tz2));
+
+    if (t_out < 0) return false;
+
+    return t_out >= t_in;
 }

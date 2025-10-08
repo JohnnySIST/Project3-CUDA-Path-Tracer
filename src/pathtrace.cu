@@ -10,6 +10,9 @@
 #include <thrust/sequence.h>
 #include <thrust/gather.h>
 #include <thrust/device_ptr.h>
+#include <vector>
+#include <string>
+#include <numeric>
 
 #include "sceneStructs.h"
 #include "scene.h"
@@ -24,7 +27,7 @@
 #define USE_COMPACTION 1
 #define USE_SORT_MATERIAL 1
 #define USE_RANDOM_SAMPLE 1
-#define USE_BVH 1
+#define USE_BVH 0
 
 #define USE_RUSSIAN_ROULETTE 1
 #define P_RR 0.9f // Russian Roulette probability
@@ -99,6 +102,19 @@ static ShadeableIntersection* dev_intersections = NULL;
 // static ShadeableIntersection* dev_intersections_tmp = NULL;
 // Meshes
 static MeshGPU* dev_meshes = NULL;
+
+struct KernelTimer {
+    std::vector<float> times;
+    std::string name;
+    KernelTimer(const std::string& n) : name(n) {}
+    void add(float t) { times.push_back(t); }
+    float mean() const { return times.empty() ? 0.0f : std::accumulate(times.begin(), times.end(), 0.0f) / times.size(); }
+    void print() const { printf("Kernel %s mean: %.3f ms\n", name.c_str(), mean()); }
+};
+
+static KernelTimer timer_generateRay("generateRayFromCamera");
+static KernelTimer timer_intersect("computeIntersections");
+static KernelTimer timer_shadeBSDF("shadeBSDFMaterial");
 
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
@@ -531,7 +547,17 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     // TODO: perform one iteration of path tracing
 
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start, 0);
     generateRayFromCamera<<<blocksPerGrid2d, blockSize2d>>>(cam, iter, traceDepth, dev_paths);
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    float elapsed = 0; cudaEventElapsedTime(&elapsed, start, stop);
+    timer_generateRay.add(elapsed);
+    // printf("Kernel generateRayFromCamera: %.3f ms\n", elapsed);
+    cudaEventDestroy(start); cudaEventDestroy(stop);
     checkCUDAError("generate camera ray");
 
     int depth = 0;
@@ -549,15 +575,15 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         // tracing
         dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
-        computeIntersections<<<numblocksPathSegmentTracing, blockSize1d>>> (
-            depth,
-            num_paths,
-            dev_paths,
-            dev_geoms,
-            hst_scene->geoms.size(),
-            dev_intersections,
-            dev_meshes
-        );
+        cudaEventCreate(&start); cudaEventCreate(&stop);
+        cudaEventRecord(start, 0);
+        computeIntersections<<<numblocksPathSegmentTracing, blockSize1d>>>(depth, num_paths, dev_paths, dev_geoms, hst_scene->geoms.size(), dev_intersections, dev_meshes);
+        cudaEventRecord(stop, 0);
+        cudaEventSynchronize(stop);
+        elapsed = 0; cudaEventElapsedTime(&elapsed, start, stop);
+        timer_intersect.add(elapsed);
+        // printf("Kernel computeIntersections: %.3f ms\n", elapsed);
+        cudaEventDestroy(start); cudaEventDestroy(stop);
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();
         depth++;
@@ -593,35 +619,26 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         // path segments that have been reshuffled to be contiguous in memory.
 
         if (USE_BSDF) {
-            shadeBSDFMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
-                iter,
-                depth,
-                num_paths,
-                dev_intersections,
-                dev_paths,
-                dev_materials
-            );
+            cudaEventCreate(&start); cudaEventCreate(&stop);
+            cudaEventRecord(start, 0);
+            shadeBSDFMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(iter, depth, num_paths, dev_intersections, dev_paths, dev_materials);
+            cudaEventRecord(stop, 0);
+            cudaEventSynchronize(stop);
+            elapsed = 0; cudaEventElapsedTime(&elapsed, start, stop);
+            timer_shadeBSDF.add(elapsed);
+            // printf("Kernel shadeBSDFMaterial: %.3f ms\n", elapsed);
+            cudaEventDestroy(start); cudaEventDestroy(stop);
             checkCUDAError("shade BSDF");
             cudaDeviceSynchronize();
         } else {
-            shadeFakeMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
-                iter,
-                num_paths,
-                dev_intersections,
-                dev_paths,
-                dev_materials
-            );
+            shadeFakeMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(iter, num_paths, dev_intersections, dev_paths, dev_materials);
             checkCUDAError("shade fake material");
             cudaDeviceSynchronize();
         }
 
         // add colors to image
         if (USE_COMPACTION) {
-            iterGather<<<numblocksPathSegmentTracing, blockSize1d>>>(
-                num_paths,
-                dev_image,
-                dev_paths
-            );
+            iterGather<<<numblocksPathSegmentTracing, blockSize1d>>>(num_paths, dev_image, dev_paths);
             checkCUDAError("iter gather");
             cudaDeviceSynchronize();
 
@@ -663,6 +680,10 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     // Retrieve image from GPU
     cudaMemcpy(hst_scene->state.image.data(), dev_image,
         pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+
+    timer_generateRay.print();
+    timer_intersect.print();
+    timer_shadeBSDF.print();
 
     checkCUDAError("pathtrace");
 }

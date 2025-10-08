@@ -88,3 +88,5 @@ __host__ __device__ float meshIntersectionTestBVH(
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
     bool& outside);
+
+__host__ __device__ bool AABBintersectTest(AABB aabb, glm::vec3 origin, glm::vec3 direction);
